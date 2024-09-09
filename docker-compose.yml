@@ -1,0 +1,101 @@
+version: '3'
+
+services:
+  cadvisor:
+    image: gcr.io/cadvisor/cadvisor:latest
+    container_name: cadvisor
+    ports:
+      - "8080:8080"  # Exposing cAdvisor on port 8080
+    volumes:
+      - /:/rootfs:ro
+      - /var/run:/var/run:ro
+      - /sys:/sys:ro
+      - /var/lib/docker/:/var/lib/docker:ro
+    networks:
+      - monitoring
+
+  nginx:
+    image: nginx:latest
+    container_name: nginx
+    ports:
+      - "80:80"
+    volumes:
+      # - ./nginx.conf:/etc/nginx/nginx.conf  # Your custom Nginx config file
+      - ./nginx_logs:/var/log/nginx  # Mounting the Nginx log directory to the host
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf
+      - ./nginx/conf.d/default.conf:/etc/nginx/conf.d/default.conf
+      - ./cv-app:/usr/share/nginx/html
+
+    depends_on:
+      - grafana
+      - prometheus
+    networks:
+      - monitoring
+
+
+  nginx-exporter:
+    image: nginx/nginx-prometheus-exporter:latest
+    container_name: nginx_exporter
+    ports:
+      - "9113:9113"
+    command:
+      - '-nginx.scrape-uri=http://nginx:80/stub_status'  # Adjust as needed for your Nginx setup
+    depends_on:
+      - nginx
+    networks:
+      - monitoring
+
+  loki:
+    image: grafana/loki:latest
+    container_name: loki
+    ports:
+      - "3100:3100"
+    command: -config.file=/etc/loki/local-config.yaml
+    # volumes:
+    #   - ./loki-config.yml:/etc/loki/local-config.yaml
+    #   - ./loki-data/index:/loki/index
+    #   - ./loki-data/cache:/loki/boltdb-cache
+    #   - ./loki-data/chunks:/loki/chunks
+    #   - ./loki-data/compactor:/var/loki/compactor
+    networks:
+      - monitoring
+
+  promtail:
+    image: grafana/promtail:latest
+    container_name: promtail
+    volumes:
+      - ./promtail-config.yaml:/etc/promtail/promtail-config.yaml
+      - ./nginx_logs:/var/log/nginx  # Mount local nginx_log folder to container's /var/log/nginx
+    command: -config.file=/etc/promtail/promtail-config.yaml
+    
+    depends_on:
+      - loki
+    networks:
+      - monitoring
+
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: prometheus
+    volumes:
+      - ./prometheus.yml:/etc/prometheus/prometheus.yml  # Your custom Prometheus config file
+    ports:
+      - "9090:9090"
+    networks:
+      - monitoring
+
+  grafana:
+    image: grafana/grafana:latest
+    container_name: grafana
+    ports:
+      - "3000:3000"
+    environment:
+      - GF_SECURITY_ADMIN_PASSWORD=admin
+    depends_on:
+      - loki
+      - prometheus
+    networks:
+      - monitoring
+
+networks:
+  monitoring:
+    external: true
